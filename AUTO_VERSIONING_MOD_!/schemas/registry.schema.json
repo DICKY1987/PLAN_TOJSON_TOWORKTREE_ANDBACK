@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ID Registry",
+  "type": "object",
+  "description": "Bidirectional lookup between ULIDs and doc_keys.",
+  "additionalProperties": {
+    "type": "object",
+    "properties": {
+      "ulid": {"type": "string"},
+      "doc_key": {"type": "string"},
+      "aliases": {
+        "type": "array",
+        "items": {"type": "string"},
+        "default": []
+      }
+    },
+    "required": ["ulid", "doc_key"]
+  }
+}
