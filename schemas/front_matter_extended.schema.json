@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Document Front Matter (Extended)",
+  "type": "object",
+  "properties": {
+    "doc_key": {"type": "string"},
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "semver": {"type": "string"},
+    "status": {"type": "string"},
+    "effective_date": {"type": "string", "format": "date"},
+    "supersedes_version": {"type": ["string", "null"]},
+    "owner": {"type": "string"},
+    "contract_type": {"type": "string"},
+    "card_version": {"type": "integer", "minimum": 1},
+    "aliases": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "merged_into": {"type": ["string", "null"]},
+    "absorbs": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "mfid": {"type": ["string", "null"]}
+  },
+  "required": ["doc_key", "ulid", "semver", "status", "effective_date", "owner", "contract_type", "card_version"],
+  "additionalProperties": true
+}

@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ID Card",
+  "type": "object",
+  "properties": {
+    "doc_key": {
+      "type": "string",
+      "description": "Human‑readable identifier for the document."
+    },
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Universally unique, immutable identifier (ULID)."
+    },
+    "semver": {
+      "type": "string",
+      "description": "Semantic version of the document."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "deprecated"],
+      "description": "Status of the document."
+    },
+    "effective_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date on which the document becomes effective."
+    },
+    "supersedes_version": {
+      "type": ["string", "null"],
+      "description": "Version this document supersedes, if any."
+    },
+    "owner": {
+      "type": "string",
+      "description": "Responsible team or individual."
+    },
+    "contract_type": {
+      "type": "string",
+      "description": "Type of the document, e.g. policy, intent, execution contract."
+    },
+    "card_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version of the ID Card schema."
+    },
+    "aliases": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": [],
+      "description": "Previous doc_keys that now map to this ULID."
+    },
+    "merged_into": {
+      "type": ["string", "null"],
+      "description": "ULID this document was consolidated into, if any."
+    },
+    "absorbs": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": [],
+      "description": "ULIDs merged into this document."
+    },
+    "mfid": {
+      "type": ["string", "null"],
+      "description": "Optional content hash (blake3)."
+    }
+  },
+  "required": ["doc_key", "ulid", "semver", "status", "effective_date", "owner", "contract_type", "card_version"],
+  "additionalProperties": false
+}
