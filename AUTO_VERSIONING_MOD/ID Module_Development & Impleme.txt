@@ -1,0 +1,339 @@
+# ID Module — Development & Implementation Plan (TDD + Modular Plugins + IaC/TDI)
+
+Below is a **contract-aligned, test-first** plan to build the **identity (ID) module** as a **modular, plugin-based subsystem**. It ensures deterministic keys, immutable UIDs, append-only provenance, and smooth growth as modules/docs are added, renamed, consolidated, or deprecated.
+
+---
+
+## 0) Objectives & Non-Negotiables
+
+**Goals**
+
+* Deterministic **human keys** (e.g., `PLG_ID_MINT`, `MOD_GOAL_NORMALIZER`) + immutable **ULIDs** for machine identity.
+* Versioned **ID Cards** (per-artifact), an append-only **ID Ledger**, and a generated **ID Registry**.
+* Hard CI guards: uniqueness, immutability, JSON-schema compliance, and “one-artifact-per-PR” (if enforced).
+
+**Must keep**
+
+* **TDD/BDD** for behavior and contracts.
+* **IaC/TDI**: tests define infra/policy requirements before code (e.g., CI gates).
+* **DevOps**: CI/CD, conventional commits, immutable tags, runtime snapshots.
+* **Observability**: OpenTelemetry tracing per run (trace IDs for every plugin execution).
+* **Docs-as-Code**: schemas, examples, and cookbook docs generated & versioned.
+
+---
+
+## 1) High-Level Architecture
+
+**Files & Stores**
+
+* **ID Card** (authoritative, committed): `ids/cards/<ULID>.yaml`
+  Stable identity + additive metadata (`key`, `aliases`, `status`, relations).
+* **ID Ledger** (append-only, committed): `.ledger/ids.jsonl`
+  Event stream (`CREATE`, `REKEY`, `DEPRECATE`, `CONSOLIDATE`, `ALIAS_ADD`).
+* **ID Registry** (generated): `ids/registry.yaml` (or `.runs/<RUN_ID>/id-registry.yaml`)
+  Fast lookup map `{ ulid → { key, path, status, … }, key → ulid }`.
+
+**Core Plugins (JSON in/out; discoverable)**
+
+* `id.mint` — mint ULID + deterministic key; scaffold ID Card + `CREATE` event.
+* `id.validate` — schema checks (card/ledger), uniqueness, immutability.
+* `id.registry.build` — compile registry from cards.
+* `id.ledger.append` — append events with validation.
+* `id.guard` — PR-time rules: one-artifact, immutability, duplicates, policy.
+* `id.export.*` — optional outputs (CSV/Markdown/JSON Lines).
+
+**Profiles**
+
+* Start with **standard** profile (tests, schemas, examples included).
+  Minimal profile is supported but **not** recommended for the first release.
+
+---
+
+## 2) Data Contracts (Schemas)
+
+### 2.1 ID Card (`ids/cards/<ULID>.yaml`)
+
+```yaml
+schema_version: 1
+ulid: 01JC2P3AZ9TX8Y8ZP9A1M3B7M5         # immutable
+key: MOD_GOAL_NORMALIZER                 # human key, unique, non-reused
+aliases: []                              # additive only
+status: active                           # active|deprecated|consolidated
+created_at: 2025-11-03T00:00:00Z
+retired_at: null
+links:
+  merged_into: []                        # ULIDs
+  absorbs: []                            # ULIDs
+owner: architecture@company
+notes: ""
+card_version: 1                          # bump on metadata change (not identity)
+```
+
+### 2.2 Ledger Event (one JSON per line in `.ledger/ids.jsonl`)
+
+```json
+{
+  "event_ulid": "01JC2Q4Y7K6C2X56TT8Y9Q8ADZ",
+  "ts": "2025-11-03T00:00:12Z",
+  "type": "CREATE",
+  "subject_ulid": "01JC2P3AZ9TX8Y8ZP9A1M3B7M5",
+  "payload": { "key": "MOD_GOAL_NORMALIZER" },
+  "actor": { "by": "ci@repo", "via": "id.mint@0.1.0" }
+}
+```
+
+### 2.3 Registry (generated)
+
+```yaml
+by_ulid:
+  01JC2P3AZ9TX8Y8ZP9A1M3B7M5:
+    key: MOD_GOAL_NORMALIZER
+    status: active
+    path: modules/goal_normalizer/README.md
+    aliases: []
+by_key:
+  MOD_GOAL_NORMALIZER: 01JC2P3AZ9TX8Y8ZP9A1M3B7M5
+```
+
+> JSON Schemas for the above live in `plugins/id/<plugin_key>/schemas/*.schema.json` and are enforced in tests & CI.
+
+---
+
+## 3) Deterministic Key & UID Rules
+
+* **UID**: **ULID** (or UUIDv7) minted at creation; **never changes**.
+* **Key algorithm**: `PREFIX[_SCOPE]_SLUG[ _SUFFIX ]`
+
+  * Prefix by type: `PLG_`, `MOD_`, `DOC_`…
+  * `SLUG` = uppercase ASCII, non-alnum → `_`, collapse repeats, max 32.
+  * On collision, append deterministic **base36** 4-char suffix from CRC32(base+counter).
+* **Never reuse keys**. On rename, **same ULID**, new `key`, old→`aliases`.
+
+---
+
+## 4) Repo Layout (standard profile)
+
+```
+plugins/
+  id/
+    PLG_ID_MINT/
+      manifest.yaml
+      README.md
+      src/plg_id_mint/mint.py
+      schemas/mint.in.schema.json
+      schemas/mint.out.schema.json
+      examples/mint_request.json
+      examples/mint_response.json
+      tests/test_mint.py
+    PLG_ID_VALIDATE/
+      ...
+    PLG_ID_REGISTRY_BUILD/
+      ...
+ids/
+  cards/                               # ID Cards (committed)
+    <ULID>.yaml
+.ledger/
+  ids.jsonl                            # append-only (committed)
+scripts/
+  ids/ensure_immutability.py
+  ids/validate_structure.py
+  ids/build_registry.py
+.github/workflows/
+  id-guard.yml
+  id-post-merge.yml
+  id-release.yml
+docs/
+  id-module/                           # docs-as-code (Sphinx/MkDocs)
+```
+
+---
+
+## 5) TDD/BDD Plan (Red → Green → Refactor)
+
+### 5.1 Unit Tests (pytest)
+
+* `test_mint_generates_ulid_and_key()`
+* `test_mint_key_is_deterministic_and_collision_safe()`
+* `test_validate_fails_on_ulid_change()`
+* `test_validate_fails_on_duplicate_key_or_ulid()`
+* `test_registry_contains_all_cards_and_maps_both_ways()`
+* `test_ledger_append_only_and_schema_valid()`
+* Property tests: **immutability**, **idempotent mint** (same input ⇒ same key), **registry round-trip**.
+
+### 5.2 BDD (behave/pytest-bdd)
+
+**Feature: Manage identity lifecycle**
+
+```
+Scenario: Mint a new module ID
+  Given no existing card with key "MOD_DATA_PIPELINE"
+  When I run id.mint with name "Data Pipeline" and prefix "MOD_"
+  Then a new ULID is minted
+  And an ID Card exists at ids/cards/<ULID>.yaml with key "MOD_DATA_PIPELINE"
+  And a CREATE event is appended to .ledger/ids.jsonl
+
+Scenario: Rename with aliases
+  Given an existing ID Card with key "MOD_CLEANER"
+  When I rekey it to "MOD_DATA_CLEANER"
+  Then ULID is unchanged
+  And "MOD_CLEANER" is in aliases
+  And a REKEY event is appended
+```
+
+### 5.3 Test-Driven Infrastructure (TDI)
+
+* **Guard tests** assert CI must fail if:
+
+  * ULID changes in an edited ID Card,
+  * duplicate key/ULID appears,
+  * more than one ID artifact is modified (if you enforce one-artifact rule),
+  * schemas are violated.
+* Implement CI **after** writing these failing tests (Red → Green).
+
+---
+
+## 6) CI/CD (DevOps)
+
+**Pre-commit hooks**
+
+* `yamllint`, `jsonschema` validation for Cards & Ledger lines.
+* `pytest -q`, `behave`/`pytest-bdd`.
+* `scripts/ids/validate_structure.py` (profile & layout).
+
+**GitHub Actions**
+
+* `id-guard.yml` (on PR): run unit + BDD tests; schema checks; immutability/uniqueness; one-artifact rule.
+* `id-post-merge.yml` (on push to `main`): rebuild `ids/registry.yaml`, push immutable tag `idcard-{ULID}-v{card_version}` if Card changed; upload registry as artifact.
+* `id-release.yml` (on tag): package CLI plugins (zip/wheel), publish docs (MkDocs/Sphinx).
+
+**Conventional commits**
+
+* `feat(id): new mint plugin`
+* `fix(id): ledger validator edge case`
+* `refactor(id): normalize slugging`
+
+---
+
+## 7) Observability (OpenTelemetry)
+
+* Each plugin (`mint`, `validate`, `registry.build`, `ledger.append`, `guard`) emits **one trace** with:
+
+  * attributes: `plugin.key`, `plugin.version`, `subject.ulid`, `subject.key`, `event.type`.
+  * status: OK / ERROR with exception record.
+* Local dev: **Jaeger** or **SigNoz** via Docker Compose; in CI: **console exporter** for logs.
+* **Self-healing loop** example: run each plugin **10 times** in a smoke job to ensure stable traces and no memory leaks.
+
+---
+
+## 8) IaC / Environments
+
+* **Dev**: Docker Compose for Jaeger/SigNoz; `.env` for exporters.
+* **CI**: GitHub Actions; actions/setup-python; artifact uploads.
+* **(Optional) Cloud**: Terraform module for a small SigNoz/Jaeger receiver; S3 bucket for nightly registry exports.
+
+> Practice **TDI**: write an infra test (e.g., “Jaeger collector reachable”) before wiring Compose/Terraform.
+
+---
+
+## 9) Implementation Phases (each phase = TDD loop + docs)
+
+### Phase 1 — Scaffolding & Schemas
+
+* Create plugin skeletons (`PLG_ID_MINT`, `PLG_ID_VALIDATE`, `PLG_ID_REGISTRY_BUILD`).
+* Write JSON Schemas for Card, Ledger Event, Mint I/O.
+* **Tests first** for schemas & structure; implement minimal code to pass.
+
+**Deliverables**: plugin folders, `manifest.yaml`, schemas, examples, unit+BDD tests green.
+
+---
+
+### Phase 2 — Key & ULID Engine
+
+* Implement deterministic key function (prefix/slug/suffix).
+* Integrate ULID mint.
+* Guard against collisions; add property tests.
+
+**Deliverables**: `mint.py` complete; examples seeded; BDD pass.
+
+---
+
+### Phase 3 — Ledger & Immutability
+
+* Implement `ledger.append` and event validation.
+* Add immutability check: reject ULID change on existing cards.
+* Append-only tests: old events remain; new events validate.
+
+**Deliverables**: ledger helpers, immutability guard, tests green.
+
+---
+
+### Phase 4 — Registry Build & Guards
+
+* Implement `registry.build`.
+* PR-time guard: uniqueness, one-artifact rule, schema checks, lint.
+* Add GitHub Actions `id-guard.yml`.
+
+**Deliverables**: `ids/registry.yaml` generated; CI fails on violations.
+
+---
+
+### Phase 5 — Lifecycle Ops
+
+* **REKEY** (rename): keep ULID; move old key → `aliases`.
+* **DEPRECATE** and **CONSOLIDATE**: add links (`merged_into`, `absorbs`).
+* Tests for backlink & forward-link integrity.
+
+**Deliverables**: lifecycle CLI, BDD features.
+
+---
+
+### Phase 6 — Observability & Runtime Snapshots
+
+* OTel spans & attributes; Docker Compose for Jaeger/SigNoz.
+* Runtime snapshot: dump `{ ulid→key, key→ulid, status }` to `.runs/<RUN_ID>/ids.json`.
+* Ten-run smoke with unique trace IDs.
+
+**Deliverables**: traces visible; snapshot artifact produced.
+
+---
+
+### Phase 7 — Docs-as-Code & Release
+
+* MkDocs/Sphinx: “ID Module Handbook” (contracts, APIs, examples, FAQ).
+* `id-release.yml`: package & tag `idmod-{semver}`; publish docs.
+
+**Deliverables**: site build, versioned release, immutable tags.
+
+---
+
+## 10) Acceptance Criteria (Definition of Done)
+
+* ✅ **Deterministic** keys; **immutable** ULIDs; CI guards enforce both.
+* ✅ **ID Cards** & **Ledger** are versioned in Git; **Registry** builds clean.
+* ✅ **TDD/BDD**: ≥ 90% coverage for core paths; BDD features for lifecycle.
+* ✅ **TDI**: CI fails on schema/immutability/duplicate/one-artifact violations.
+* ✅ **OTel**: traces for all plugin runs; visible in local Jaeger/SigNoz.
+* ✅ **Docs**: schemas, examples, “How-to”s, and troubleshooting published.
+* ✅ **No broken history** on rename/deprecate/consolidate; ledger proves lineage.
+
+---
+
+## 11) Risks & Mitigations
+
+* **Key churn**: Prevent by policy; if rename needed, use `aliases`; ULID remains.
+* **Manual edits to Ledger**: Disallow; `ledger.append` is the only write path; schema + signature checks (optional).
+* **Cross-repo references**: Add `scope` or `{org, repo}` fields; export/import tasks with validation.
+
+---
+
+## 12) Ready-to-Build Backlog (first pass)
+
+* [ ] Schemas: `id_card.schema.json`, `ledger_event.schema.json`, `mint.in/out.schema.json`
+* [ ] Plugins: `PLG_ID_MINT`, `PLG_ID_VALIDATE`, `PLG_ID_REGISTRY_BUILD`
+* [ ] Tests: unit + property + BDD (features/lifecycle.feature)
+* [ ] CI: `id-guard.yml`, `id-post-merge.yml`
+* [ ] Scripts: `ensure_immutability.py`, `build_registry.py`, `validate_structure.py`
+* [ ] OTel: console exporter; docker-compose Jaeger
+* [ ] Docs: “ID Module Handbook” with examples and PR cookbook
+
+---

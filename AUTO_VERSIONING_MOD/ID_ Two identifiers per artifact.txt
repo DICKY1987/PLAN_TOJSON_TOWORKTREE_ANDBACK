@@ -1,0 +1,206 @@
+tight, contract-aligned way to do IDs that stays stable as you add/merge/retire modules—while remaining fully deterministic.
+
+1) Two identifiers per artifact (human + machine)
+
+Human-stable key (for readability & cross-refs): doc_key, module_key, etc.
+
+Examples: OC_CORE, PIPELINE_POLICY, MOD_GOAL_NORMALIZER.
+
+Machine UID (globally unique, never reused): ulid (or uuidv7).
+
+Examples: 01JC2P3AZ9TX8Y8ZP9A1M3B7M5.
+
+Use the human key everywhere users read/write. Use the UID for invariants (joins, merges, tombstones). Both live in front-matter and the registry.
+
+---
+doc_key: OC_CORE
+ulid: 01JC2P3AZ9TX8Y8ZP9A1M3B7M5
+semver: 1.3.0
+status: active
+effective_date: 2025-11-03
+owner: architecture@company
+contract_type: operating_contract
+aliases: [ OC, OC_MAIN ]        # optional
+---
+
+2) How the human key is determined (deterministic)
+
+Algorithm (deterministic, collision-resistant):
+
+Choose a type prefix:
+
+Docs/Contracts: OC_, POL_, REF_
+
+Modules: MOD_
+
+Pipelines: PIPE_
+
+Plugins: PLG_
+
+Compute a slug from the canonical name:
+
+Uppercase, ASCII, non-alnum → _, collapse repeats, trim to 32 chars.
+
+Optional scope segment if you operate across repos/orgs: RPIPE_, CLIRES_, etc.
+
+Compose: PREFIX[scope_]SLUG
+
+If a collision with a different artifact is detected in the registry, append a short base36 hash suffix: …_A7K9.
+
+Result is stable for a given canonical name, and repeatable on any machine.
+
+Compact Python (for your script):
+
+import re, zlib, base64
+
+def slugify(name: str, maxlen=32):
+    s = re.sub(r'[^A-Za-z0-9]+', '_', name).strip('_').upper()
+    return s[:maxlen] if len(s) > maxlen else s
+
+def key_for(prefix: str, name: str, scope: str|None=None, taken: set[str]=set()):
+    base = f"{prefix}{scope+'_' if scope else ''}{slugify(name)}"
+    key = base
+    i = 0
+    while key in taken:
+        i += 1
+        # short, deterministic suffix from base+counter
+        h = zlib.crc32(f"{base}:{i}".encode()) % (36**4)
+        suffix = ""
+        n = h
+        for _ in range(4):
+            n, r = divmod(n, 36)
+            suffix = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[r] + suffix
+        key = f"{base}_{suffix}"
+    return key
+
+3) How the machine UID is determined (monotonic + sortable)
+
+Use ULID (or uuidv7) at creation. It’s time-sortable, globally unique, and never changes.
+
+Store it in front-matter and the registry (docs/registry.yaml).
+
+This UID is what you reference in merges, deprecations, and provenance graphs.
+
+4) Registry & uniqueness enforcement
+
+Your CI already builds a registry; extend it to enforce:
+
+Uniqueness of human keys (doc_key / module_key) across the repo.
+
+Immutability of ulid once set (reject PRs that change a UID).
+
+Path independence: the key & UID must not change if a file moves.
+
+Minimal docs/registry.yaml shape:
+
+OC_CORE:
+  ulid: 01JC2P3AZ9TX8...
+  path: docs/contracts/operating-contract.md
+  semver: 1.3.0
+  status: active
+  aliases: [ OC, OC_MAIN ]
+MOD_GOAL_NORMALIZER:
+  ulid: 01J4W…R4
+  path: modules/goal_normalizer/README.md
+  semver: 0.5.2
+  status: active
+
+5) Growth: adding more modules
+
+New module → mint ULID + compute module_key with the algorithm above.
+
+CI fails the PR if the key collides; the script will auto-suffix with a 4-char base36 tag, but you can also rename for clarity.
+
+Keys are permanent once merged; avoid churn.
+
+6) Deletion, consolidation, rename (no broken history)
+
+Never reuse keys. Use tombstones and relations:
+
+A) Deprecate (soft delete)
+
+Keep the file (or a 5-line stub) with status + pointers:
+
+---
+module_key: MOD_DATA_CLEANER
+ulid: 01J9…ZP
+semver: 1.8.4
+status: deprecated
+effective_date: 2025-11-03
+deprecated_reason: "Merged into MOD_DATA_PIPELINE"
+merged_into: [ 01JC2…B7M5 ]     # ULIDs of successors
+aliases: [ MOD_CLEANER ]
+---
+
+
+Post-merge immutable tag still created; history is intact.
+
+The orchestrator can surface “this module is deprecated; see successor”.
+
+B) Consolidate (N → 1)
+
+Create a new module (new ULID, new module_key) and mark all absorbed modules as deprecated, with:
+
+merged_into: [<new_module_ulid>]
+
+On the new module, add absorbs: [<old_ulid_1>, <old_ulid_2>, …] for reverse lookup.
+
+---
+module_key: MOD_DATA_PIPELINE
+ulid: 01JC2…M5
+status: active
+absorbs: [ 01J9…ZP, 01J8…Q1 ]   # old module ULIDs
+---
+
+C) Rename (human key change)
+
+Prefer not to. If you must:
+
+Keep the same ULID.
+
+Update module_key and add the old key to aliases: [...].
+
+Add a tiny stub file at the old path that says “moved to …” (optional but nice for grep).
+
+Invariant: ULID never changes; old keys never get reused; aliases + tombstones preserve backlinks and tag history.
+
+7) Deterministic cross-repo federation (optional)
+
+If you’ll reference across repos/orgs, bake a scope into keys:
+
+Pattern: PREFIX{ORG}_{REPO}_{SLUG} (e.g., MOD_ORG_RPIPE_GOAL_NORMALIZER)
+
+Or keep short keys locally and add origin: { org: "...", repo: "..." } in the registry to qualify when exporting.
+
+8) Content fingerprints (not identity)
+
+For diff/audit, keep an MFID (content hash) but never use it as identity:
+
+mfid = sha256(normalize(markdown_body))
+
+Changes every edit (good for provenance), but ULID stays the same.
+
+9) CI rules that make this safe
+
+Front-matter required (doc_key/module_key, ulid, semver, status, …).
+
+Unique key check (fail on duplicates).
+
+UID immutability (fail if ulid changes for an existing artifact).
+
+One-doc/module per PR (if that’s your rule).
+
+Post-merge tags: docs-{doc_key}-{semver}, mod-{module_key}-{semver}.
+
+Runtime snapshot writes {key→semver, ulid} into the run ledger.
+
+10) FAQ
+
+Q: Is the system structured and deterministic?
+Yes. Key generation is algorithmic and repeatable; UID is monotonic-random (ULID) and immutable; CI enforces both. No manual guesswork.
+
+Q: What if two teams propose the same new module name?
+The first merged PR “wins” the clean key. The second PR automatically gets a short suffix (_05K2) or can rename—CI will force a decision before merge.
+
+Q: Can we ever recycle a key?
+No. We preserve auditability. Use tombstones + aliases/merged_into/absorbs.

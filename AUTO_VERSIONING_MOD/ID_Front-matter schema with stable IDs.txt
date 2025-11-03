@@ -1,0 +1,114 @@
+What the contract already gives you (use it!)
+
+Front-matter schema with stable IDs (doc_key, semver, etc.). Use this on every policy/plan doc so each one has a permanent identifier and version number. (See the sample block under “Migrate Existing Documents”.)
+
+Docs guard CI that blocks merges unless the front-matter exists, SemVer bumps are correct, and special rules (like no MINOR for execution_contract) are followed.
+
+Post-merge tagger that creates immutable tags per document/version: docs-{doc_key}-{semver}.
+
+Runtime snapshot so every run records exactly which policy versions were in force.
+
+Conventional-commit PR title check to align “feat/fix/feat!” with the bump size your guard enforces.
+
+The contract’s first principles (docs are code; versioned, tagged, and auditable) set the ground rules your automation will enforce.
+
+Minimal module set (drop these into core/docs/)
+
+Front-Matter Validator (CI + local)
+
+Purpose: Ensure every touched file in docs/** and plans/** has valid doc_key (unique), semver, status, effective_date, owner, contract_type.
+
+Where: Keep the existing docs-guard.yml (it already parses front-matter, compares old/new versions, blocks illegal bumps).
+
+Add: A tiny uniqueness check for doc_key across the repo (see “Doc Registry Builder” below).
+
+Doc Registry Builder (scripts/build_doc_registry.py)
+
+Purpose: Scan docs/** & plans/**, extract front-matter, and write .runs/doc-registry.json with { doc_key → path, semver }. Fail if any duplicate doc_key is found (guarantees global uniqueness).
+
+CI hook: Run in the same CI job as docs-guard right after validation.
+
+SemVer Intent Enforcer (already in guard)
+
+Purpose: Map PR title intent (feat/fix/breaking) to the allowed bump and reject illegal changes; also block MINOR on execution_contract.
+
+One-Document Edit Gate (optional but matches your “only edits 1 doc” rule)
+
+Purpose: Block any PR that touches more than 1 document under docs/** or plans/**.
+
+Implementation (add a step to docs-guard job):
+
+- name: Enforce one-document rule
+  shell: bash
+  run: |
+    CHANGED=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" -- 'docs/**/*.md' 'plans/**/*.md' | wc -l)
+    if [ "$CHANGED" -gt 1 ]; then
+      echo "Only one documentation file may change per PR (found: $CHANGED)." >&2
+      exit 1
+    fi
+
+
+(Pair this with branch protection “Require status checks to pass before merging”.)
+
+Post-Merge Tagger (already defined)
+
+Purpose: After merge to main, create annotated tags per changed doc/version (docs-{doc_key}-{semver}) and push. This is your immutable snapshot per document.
+
+Runtime Policy Snapshot (startup hook)
+
+Purpose: On every pipeline run, call Get-ActivePolicyVersions (PowerShell) or get_doc_versions.py (Python) and persist to the run ledger so you can answer “what rules were active when this ran?”.
+
+Quick “how to wire it” (copy/paste)
+
+A. Keep/enable the existing CI guard & title check
+They already validate front-matter + SemVer and enforce intent.
+
+B. Add a doc-key uniqueness pass
+Put this right after the “Validate changed docs” step:
+
+- name: Build doc registry & enforce unique doc_key
+  run: |
+    python - << 'PY'
+    import json, sys, re
+    from pathlib import Path
+    import frontmatter
+    roots = [Path("docs"), Path("plans")]
+    seen = {}
+    dupes = []
+    for root in roots:
+      for p in root.rglob("*.md"):
+        post = frontmatter.loads(p.read_text(encoding="utf-8"))
+        dk = (post.metadata or {}).get("doc_key")
+        if not dk: 
+          continue
+        if dk in seen and seen[dk] != str(p):
+          dupes.append((dk, seen[dk], str(p)))
+        seen.setdefault(dk, str(p))
+    Path(".runs").mkdir(exist_ok=True)
+    Path(".runs/doc-registry.json").write_text(json.dumps(seen, indent=2))
+    if dupes:
+      print("Duplicate doc_key detected:", dupes, file=sys.stderr)
+      sys.exit(1)
+    PY
+
+
+C. Add the optional “one-document” rule (step shown above).
+
+D. Keep the post-merge doc tagger workflow (creates docs-{doc_key}-{semver} tags).
+
+E. Wire the runtime snapshot (choose PowerShell or Python).
+PowerShell example provided in the contract—drop it in scripts/Get-DocVersions.ps1 and call it on run start; it returns a map {OC_CORE, PIPELINE_POLICY, …} you can log into the run ledger.
+
+Migrating existing docs (once)
+
+Use the contract’s “Migrate Existing Documents” step: add front-matter with an initial semver: 1.0.0, set doc_key to a permanent identifier, then PR and fast-track approval for the migration.
+
+Why this answers your needs
+
+Unique identifiers: enforced via required doc_key + a uniqueness scan on CI; tags are derived from doc_key to make immutable snapshots per document.
+
+Versioning: SemVer validated automatically; PR title intent is checked; exec-contract minor bumps are blocked.
+
+“Only edits 1 document”: the optional guard ensures that any PR touching documentation affects a single file; combined with branch protection it becomes a hard rule.
+
+End-to-end auditability: every run logs the active policy versions to the ledger, so you can reconstruct “what rules were in force” later.

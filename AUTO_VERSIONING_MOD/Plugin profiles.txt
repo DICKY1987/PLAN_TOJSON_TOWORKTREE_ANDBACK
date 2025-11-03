@@ -1,0 +1,177 @@
+
+
+# Plugin profiles (choose one and enforce)
+
+* **minimal** (fast prototypes, single capability)
+* **standard** (default for 90% of plugins)
+* **enterprise** (compliance/telemetry-heavy)
+
+# Required layout (per profile)
+
+```
+plugins/
+  <domain>/                       # e.g., id/, docs/, patcher/
+    <plugin_key>/                 # e.g., PLG_ID_MINT
+      manifest.yaml               # REQUIRED (all profiles)
+      src/                        # REQUIRED (all)
+        <pkg_name>/
+          __init__.py
+          <capability>.py         # ≥1 entrypoint; one file per capability (all)
+      README.md                   # minimal: optional | standard/enterprise: REQUIRED
+      tests/                      # minimal: optional | standard/enterprise: REQUIRED
+        test_<capability>.py
+      schemas/                    # minimal: optional | standard/enterprise: REQUIRED
+        <capability>.in.schema.json
+        <capability>.out.schema.json
+      examples/                   # minimal: optional | standard/enterprise: REQUIRED
+        <capability>_request.json
+        <capability>_response.json
+      config.defaults.yaml        # enterprise: REQUIRED (others: optional)
+      hooks/                      # enterprise: optional (pre/post run)
+        pre.py
+        post.py
+```
+
+**ID artifacts (versioned as first-class files)**
+
+```
+ids/
+  cards/
+    <ULID>.yaml                   # REQUIRED for all plugins (authoritative ID Card)
+.ledger/ids.jsonl                 # Append-only ledger (CREATE/REKEY/DEPRECATE/etc.)
+```
+
+> Consistency rule: every plugin includes a **manifest.yaml** and an **ID Card** (`ids/cards/<ULID>.yaml`). The rest is profile-dependent.
+
+# Example `manifest.yaml` (standard profile)
+
+```yaml
+api: 1
+profile: standard
+plugin_key: PLG_ID_MINT                # deterministic human key
+ulid: 01JC2P3AZ9TX8Y8ZP9A1M3B7M5       # immutable UID (matches ID Card)
+version: 0.3.0                         # plugin SemVer (code), not the ID Card version
+domain: id
+capabilities:
+  - name: id.mint
+    entry: "src/plg_id_mint/mint.py"
+    in_schema: "schemas/mint.in.schema.json"
+    out_schema: "schemas/mint.out.schema.json"
+contracts:
+  stdin: json
+  stdout: json
+  exit_codes:
+    0: ok
+    2: validation_error
+    3: internal_error
+artifacts:
+  id_card: "ids/cards/01JC2P3AZ9TX8Y8ZP9A1M3B7M5.yaml"
+  examples:
+    - "examples/mint_request.json"
+    - "examples/mint_response.json"
+tests:
+  - "tests/test_mint.py"
+```
+
+# ID Card (versioned file, required for all plugins)
+
+```yaml
+# ids/cards/01JC2P3AZ9TX8Y8ZP9A1M3B7M5.yaml
+schema_version: 1
+ulid: 01JC2P3AZ9TX8Y8ZP9A1M3B7M5
+key: PLG_ID_MINT
+aliases: []
+status: active             # active|deprecated|consolidated
+owner: architecture@company
+created_at: 2025-11-03T10:00:00Z
+links:
+  merged_into: []
+  absorbs: []
+card_version: 1            # bump when metadata (not identity) changes
+notes: ""
+```
+
+# File count by profile (so you can enforce consistency)
+
+* **minimal**: 3 required
+
+  * `manifest.yaml`, `src/<pkg>/<capability>.py`, `ids/cards/<ULID>.yaml`
+  * (+ optional README/tests/schemas/examples)
+* **standard**: 8 required
+
+  * `manifest.yaml`, `src/<pkg>/<capability>.py`, `README.md`, `tests/test_<capability>.py`,
+    `schemas/<cap>.in.schema.json`, `schemas/<cap>.out.schema.json`, `examples/*`, `ids/cards/<ULID>.yaml`
+* **enterprise**: 10+ required
+
+  * everything in **standard** + `config.defaults.yaml` and `hooks/` (pre/post), possibly CODEOWNERS, compliance notes, telemetry config.
+
+# Why not force a single file count for all plugins?
+
+* Different plugins expose **one vs many capabilities**. We standardize **structure and names**, not absolute count.
+* Profiles keep teams consistent while allowing legitimate variation.
+
+# CI guard (enforces structure per profile)
+
+Add a small validator (run in PR workflows):
+
+```python
+# scripts/plugins/validate_structure.py
+import sys, yaml, pathlib
+
+REQ = {
+  "minimal": {
+    "must_exist": [
+      "manifest.yaml",
+      "src/*/*.py",
+      "../../../ids/cards/*.yaml"  # resolve via repo root
+    ]
+  },
+  "standard": {
+    "must_exist": [
+      "manifest.yaml",
+      "src/*/*.py",
+      "README.md",
+      "tests/test_*.py",
+      "schemas/*.in.schema.json",
+      "schemas/*.out.schema.json",
+      "../../../ids/cards/*.yaml",
+      "examples/*_request.json",
+      "examples/*_response.json"
+    ]
+  },
+  "enterprise": {
+    "must_exist": [
+      # all standard
+      "manifest.yaml","src/*/*.py","README.md","tests/test_*.py",
+      "schemas/*.in.schema.json","schemas/*.out.schema.json",
+      "../../../ids/cards/*.yaml","examples/*_request.json","examples/*_response.json",
+      "config.defaults.yaml"
+    ]
+  }
+}
+
+def glob_any(root, patterns):
+    return all(any(root.glob(p)) for p in patterns)
+
+root = pathlib.Path.cwd()
+for manifest in root.glob("plugins/**/manifest.yaml"):
+    pfolder = manifest.parent
+    data = yaml.safe_load(manifest.read_text())
+    profile = data.get("profile","standard")
+    patterns = REQ[profile]["must_exist"]
+    if not glob_any(pfolder, patterns):
+        print(f"[STRUCTURE] {pfolder}: missing required files for profile '{profile}'", file=sys.stderr)
+        sys.exit(1)
+print("[STRUCTURE] OK")
+```
+
+Pair this with your existing checks (ULID immutability, key uniqueness, one-artifact-per-PR if desired).
+
+# What this guarantees
+
+* **Consistency**: every plugin adheres to a predictable directory schema; within a profile, the required file set is identical.
+* **Determinism**: IDs (ULID + deterministic `plugin_key`) live in versioned files; CI prevents drift.
+* **Scalability**: add capabilities → add entrypoint files; promote a plugin from **minimal → standard** without breaking rules.
+* **Auditability**: ID Cards + append-only Ledger make provenance clear; post-merge tags can further lock versions.
+
+If you want, I can generate a ready-to-commit **scaffold script** (`scripts/plugins/scaffold.py`) that creates the correct file set for any profile and capability list in one go.
