@@ -1,0 +1,486 @@
+ ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+     │ Parallelized Implementation Plan: 4 Independent Workstreams                                                     │
+     │                                                                                                                 │
+     │ Overview                                                                                                        │
+     │                                                                                                                 │
+     │ Break the 7-week sequential plan into 4 concurrent workstreams that can be developed independently, reducing    │
+     │ total time from 7 weeks to ~4 weeks with proper team coordination.                                              │
+     │                                                                                                                 │
+     │ Dependency Analysis                                                                                             │
+     │                                                                                                                 │
+     │ Critical Path (Must Be Sequential)                                                                              │
+     │                                                                                                                 │
+     │ 1. Schemas → Everything depends on these                                                                        │
+     │ 2. Core Data Structures (ID Card, Ledger Event) → Plugins depend on these                                       │
+     │ 3. Integration Testing → Requires all workstreams to converge                                                   │
+     │                                                                                                                 │
+     │ Parallelizable Components                                                                                       │
+     │                                                                                                                 │
+     │ - Plugin implementations (mint, validate, ledger, registry, lifecycle ops)                                      │
+     │ - CI workflows (can be developed against mock data)                                                             │
+     │ - Migration tooling (depends only on schemas)                                                                   │
+     │ - Observability/export features (minimal dependencies)                                                          │
+     │                                                                                                                 │
+     │ 4 Workstreams                                                                                                   │
+     │                                                                                                                 │
+     │ Workstream A: Core Infrastructure & Schemas (Critical Path)                                                     │
+     │                                                                                                                 │
+     │ Owner: Lead architect or senior devDuration: 3-4 weeksDependencies: None                                        │
+     │                                                                                                                 │
+     │ Week 1: Foundation                                                                                              │
+     │                                                                                                                 │
+     │ - Define all JSON schemas                                                                                       │
+     │   - schemas/id_card.schema.json                                                                                 │
+     │   - schemas/ledger_event.schema.json                                                                            │
+     │   - schemas/front_matter_extended.schema.json                                                                   │
+     │   - schemas/registry.schema.json                                                                                │
+     │ - Create data models/classes                                                                                    │
+     │   - core/models/id_card.py (dataclass + validation)                                                             │
+     │   - core/models/ledger_event.py (enum for event types)                                                          │
+     │   - core/models/registry.py (lookup structure)                                                                  │
+     │ - Define plugin interface contract                                                                              │
+     │   - core/plugins/id/base.py (abstract base class)                                                               │
+     │   - Input/output contracts for each plugin type                                                                 │
+     │ - Set up test infrastructure                                                                                    │
+     │   - tests/conftest.py (shared fixtures)                                                                         │
+     │   - Mock data generators                                                                                        │
+     │   - Test utilities                                                                                              │
+     │ - Deliverable: Schemas + interfaces published for other workstreams                                             │
+     │                                                                                                                 │
+     │ Week 2-3: Core Plugins (Sequential within workstream)                                                           │
+     │                                                                                                                 │
+     │ - Implement id.mint (ULID generation + deterministic key)                                                       │
+     │ - Implement id.validate (schema validation + uniqueness)                                                        │
+     │ - Implement id.ledger.append (append-only writes)                                                               │
+     │ - Implement id.registry.build (parse cards → registry)                                                          │
+     │ - Unit tests for each (TDD approach)                                                                            │
+     │ - Deliverable: Core plugins ready for integration                                                               │
+     │                                                                                                                 │
+     │ Week 4: Integration & Documentation                                                                             │
+     │                                                                                                                 │
+     │ - Integration tests (full lifecycle)                                                                            │
+     │ - Performance testing (large repos)                                                                             │
+     │ - Core documentation (ID_MODULE_HANDBOOK.md - Sections 1-3)                                                     │
+     │ - Deliverable: Production-ready core system                                                                     │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Workstream B: CI/CD Automation (Parallel)                                                                       │
+     │                                                                                                                 │
+     │ Owner: DevOps engineer or CI specialistDuration: 3 weeksDependencies: Schemas (Week 1 from Workstream A)        │
+     │                                                                                                                 │
+     │ Week 1: Setup & Mock Development                                                                                │
+     │                                                                                                                 │
+     │ - Wait for schemas from Workstream A                                                                            │
+     │ - Create mock data for testing workflows                                                                        │
+     │   - Sample ID Cards (valid/invalid)                                                                             │
+     │   - Sample ledger events                                                                                        │
+     │   - Sample documents with front-matter                                                                          │
+     │ - Set up local testing environment                                                                              │
+     │   - Docker container with GitHub Actions runner                                                                 │
+     │   - Local git repo for testing                                                                                  │
+     │                                                                                                                 │
+     │ Week 2: Pre-Merge Workflow                                                                                      │
+     │                                                                                                                 │
+     │ - Implement .github/workflows/id-guard.yml                                                                      │
+     │   - Checkout code                                                                                               │
+     │   - Install dependencies                                                                                        │
+     │   - Run id.validate on changed ID Cards                                                                         │
+     │   - Run front-matter validation                                                                                 │
+     │   - Check ULID immutability (compare with base branch)                                                          │
+     │   - Check doc_key uniqueness                                                                                    │
+     │   - Report validation errors as PR comments                                                                     │
+     │ - Test with mock data                                                                                           │
+     │ - Deliverable: Pre-merge validation workflow                                                                    │
+     │                                                                                                                 │
+     │ Week 3: Post-Merge & Release Workflows                                                                          │
+     │                                                                                                                 │
+     │ - Implement .github/workflows/id-post-merge.yml                                                                 │
+     │   - Trigger on push to main                                                                                     │
+     │   - Run id.registry.build                                                                                       │
+     │   - Create git tags (dual: docs + idcard)                                                                       │
+     │   - Commit generated registry (if changed)                                                                      │
+     │ - Implement .github/workflows/id-release.yml                                                                    │
+     │   - Trigger on version tags                                                                                     │
+     │   - Generate release notes from ledger                                                                          │
+     │   - Export registry snapshot                                                                                    │
+     │ - Integration with existing docs-guard.yml and doc-tags.yml                                                     │
+     │ - Deliverable: Full CI/CD automation                                                                            │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Workstream C: Lifecycle Operations & BDD (Parallel)                                                             │
+     │                                                                                                                 │
+     │ Owner: Developer with BDD/testing expertiseDuration: 3 weeksDependencies: Schemas (Week 1 from Workstream A)    │
+     │                                                                                                                 │
+     │ Week 1: BDD Features & Setup                                                                                    │
+     │                                                                                                                 │
+     │ - Wait for schemas from Workstream A                                                                            │
+     │ - Set up behave framework                                                                                       │
+     │   - features/environment.py (test setup/teardown)                                                               │
+     │   - Shared step definitions                                                                                     │
+     │ - Write BDD features (Gherkin)                                                                                  │
+     │   - features/rename_document.feature (REKEY)                                                                    │
+     │   - features/deprecate_document.feature (DEPRECATE)                                                             │
+     │   - features/merge_documents.feature (CONSOLIDATE)                                                              │
+     │ - Create test fixtures                                                                                          │
+     │   - Sample documents for each scenario                                                                          │
+     │   - Expected outcomes                                                                                           │
+     │ - Deliverable: BDD test suite (scenarios defined)                                                               │
+     │                                                                                                                 │
+     │ Week 2: Lifecycle Plugin Implementation                                                                         │
+     │                                                                                                                 │
+     │ - Implement core/plugins/id/rekey.py                                                                            │
+     │   - Update doc_key                                                                                              │
+     │   - Move old key to aliases                                                                                     │
+     │   - Update ID Card                                                                                              │
+     │   - Append REKEY event                                                                                          │
+     │ - Implement core/plugins/id/deprecate.py                                                                        │
+     │   - Set status: deprecated                                                                                      │
+     │   - Add deprecated_date + reason                                                                                │
+     │   - Append DEPRECATE event                                                                                      │
+     │ - Implement core/plugins/id/consolidate.py                                                                      │
+     │   - Link source → target                                                                                        │
+     │   - Update merged_into / absorbs                                                                                │
+     │   - Append CONSOLIDATE event                                                                                    │
+     │ - Deliverable: Lifecycle plugins                                                                                │
+     │                                                                                                                 │
+     │ Week 3: BDD Step Definitions & Testing                                                                          │
+     │                                                                                                                 │
+     │ - Implement step definitions for each feature                                                                   │
+     │   - features/steps/rename_steps.py                                                                              │
+     │   - features/steps/deprecate_steps.py                                                                           │
+     │   - features/steps/merge_steps.py                                                                               │
+     │ - Run BDD tests (behave)                                                                                        │
+     │ - Fix issues, iterate                                                                                           │
+     │ - Deliverable: Passing BDD test suite                                                                           │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Workstream D: Migration, Export & Observability (Parallel)                                                      │
+     │                                                                                                                 │
+     │ Owner: Developer with observability/tooling focusDuration: 3 weeksDependencies: Schemas (Week 1 from Workstream │
+     │ A)                                                                                                              │
+     │                                                                                                                 │
+     │ Week 1: Migration Tooling                                                                                       │
+     │                                                                                                                 │
+     │ - Wait for schemas from Workstream A                                                                            │
+     │ - Implement scripts/migrate_to_id_module.py                                                                     │
+     │   - Scan all docs in /docs and /plans                                                                           │
+     │   - Parse existing front-matter                                                                                 │
+     │   - Generate ULID for each                                                                                      │
+     │   - Create ID Card                                                                                              │
+     │   - Update front-matter with ULID                                                                               │
+     │   - Append CREATE event to ledger                                                                               │
+     │   - Dry-run mode (preview changes)                                                                              │
+     │ - Test on sample docs                                                                                           │
+     │ - Deliverable: Migration script                                                                                 │
+     │                                                                                                                 │
+     │ Week 2: Export Plugins                                                                                          │
+     │                                                                                                                 │
+     │ - Implement export plugins                                                                                      │
+     │   - core/plugins/id/export/csv.py (registry → CSV)                                                              │
+     │   - core/plugins/id/export/markdown.py (registry → table)                                                       │
+     │   - core/plugins/id/export/json.py (registry → JSON API)                                                        │
+     │ - Implement CLI wrapper                                                                                         │
+     │   - scripts/id_cli.py (command-line interface)                                                                  │
+     │   - Commands: mint, validate, rekey, deprecate, consolidate, export                                             │
+     │ - Deliverable: Export tools + CLI                                                                               │
+     │                                                                                                                 │
+     │ Week 3: Observability & Content Addressing                                                                      │
+     │                                                                                                                 │
+     │ - Implement OpenTelemetry integration                                                                           │
+     │   - core/observability/tracing.py (OTEL setup)                                                                  │
+     │   - Add tracing to all plugins (span per operation)                                                             │
+     │ - Create docker/jaeger/docker-compose.yml                                                                       │
+     │   - Jaeger all-in-one container                                                                                 │
+     │   - Pre-configured endpoints                                                                                    │
+     │ - Implement MFID (optional)                                                                                     │
+     │   - core/plugins/id/mfid.py (blake3 hash calculation)                                                           │
+     │   - Add to ID Card on file changes                                                                              │
+     │ - Deliverable: Observability + MFID                                                                             │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Integration Phase (Week 4)                                                                                      │
+     │                                                                                                                 │
+     │ All Workstreams Converge                                                                                        │
+     │                                                                                                                 │
+     │ Duration: 1 weekParticipants: All workstream owners                                                             │
+     │                                                                                                                 │
+     │ Integration Tasks                                                                                               │
+     │                                                                                                                 │
+     │ - Workstream A + B: Integrate core plugins with CI workflows                                                    │
+     │   - Test id-guard.yml with real plugins (not mocks)                                                             │
+     │   - Test id-post-merge.yml end-to-end                                                                           │
+     │ - Workstream A + C: Integrate lifecycle plugins with core                                                       │
+     │   - Ensure REKEY/DEPRECATE/CONSOLIDATE work with ledger/registry                                                │
+     │   - Run full BDD suite against integrated system                                                                │
+     │ - Workstream A + D: Integrate migration + export with core                                                      │
+     │   - Test migration script on real docs                                                                          │
+     │   - Test export plugins with generated registry                                                                 │
+     │ - All Workstreams: End-to-end integration test                                                                  │
+     │   - Create document → mint ID → modify → rekey → deprecate → export                                             │
+     │   - Verify observability (traces in Jaeger)                                                                     │
+     │   - Verify CI automation (PR validation → merge → tags)                                                         │
+     │                                                                                                                 │
+     │ Documentation Integration                                                                                       │
+     │                                                                                                                 │
+     │ - Merge documentation from all workstreams                                                                      │
+     │   - Workstream A: Core concepts, plugin architecture                                                            │
+     │   - Workstream B: CI/CD setup, workflow configuration                                                           │
+     │   - Workstream C: Lifecycle operations, BDD scenarios                                                           │
+     │   - Workstream D: Migration guide, export formats, observability                                                │
+     │ - Create unified ID_MODULE_HANDBOOK.md                                                                          │
+     │ - Update VERSIONING_OPERATING_CONTRACT.md                                                                       │
+     │ - Update CLAUDE.md                                                                                              │
+     │                                                                                                                 │
+     │ Final Testing                                                                                                   │
+     │                                                                                                                 │
+     │ - Full regression test suite                                                                                    │
+     │ - Performance testing (1000+ documents)                                                                         │
+     │ - Security review (ledger immutability, ULID collision resistance)                                              │
+     │ - User acceptance testing (UAT) with sample workflows                                                           │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Communication & Coordination                                                                                    │
+     │                                                                                                                 │
+     │ Interface Contracts (Week 0 - Before Start)                                                                     │
+     │                                                                                                                 │
+     │ Critical: Define these before workstreams begin                                                                 │
+     │                                                                                                                 │
+     │ Contract 1: JSON Schemas (Workstream A → All)                                                                   │
+     │                                                                                                                 │
+     │ // schemas/id_card.schema.json                                                                                  │
+     │ {                                                                                                               │
+     │   "$schema": "http://json-schema.org/draft-07/schema#",                                                         │
+     │   "type": "object",                                                                                             │
+     │   "required": ["ulid", "doc_key", "card_version", "status"],                                                    │
+     │   "properties": {                                                                                               │
+     │     "ulid": {"type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"},                                          │
+     │     "doc_key": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},                                              │
+     │     "card_version": {"type": "integer", "minimum": 1},                                                          │
+     │     "status": {"enum": ["active", "deprecated", "consolidated"]},                                               │
+     │     "aliases": {"type": "array", "items": {"type": "string"}},                                                  │
+     │     "merged_into": {"type": ["string", "null"]},                                                                │
+     │     "absorbs": {"type": "array", "items": {"type": "string"}},                                                  │
+     │     "mfid": {"type": ["string", "null"]}                                                                        │
+     │   }                                                                                                             │
+     │ }                                                                                                               │
+     │                                                                                                                 │
+     │ Contract 2: Plugin Interface (Workstream A → C, D)                                                              │
+     │                                                                                                                 │
+     │ # core/plugins/id/base.py                                                                                       │
+     │ from abc import ABC, abstractmethod                                                                             │
+     │ from typing import Dict, Any                                                                                    │
+     │                                                                                                                 │
+     │ class IDPlugin(ABC):                                                                                            │
+     │     @abstractmethod                                                                                             │
+     │     def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:                                            │
+     │         """                                                                                                     │
+     │         Execute plugin logic.                                                                                   │
+     │                                                                                                                 │
+     │         Args:                                                                                                   │
+     │             input_data: Plugin-specific input (validated against schema)                                        │
+     │                                                                                                                 │
+     │         Returns:                                                                                                │
+     │             {                                                                                                   │
+     │                 "status": "success" | "error",                                                                  │
+     │                 "trace_id": str,  # ULID                                                                        │
+     │                 "result": Any,    # Plugin-specific output                                                      │
+     │                 "error_message": str | None                                                                     │
+     │             }                                                                                                   │
+     │         """                                                                                                     │
+     │         pass                                                                                                    │
+     │                                                                                                                 │
+     │ Contract 3: CLI Interface (Workstream A → D)                                                                    │
+     │                                                                                                                 │
+     │ # Command signatures for id_cli.py                                                                              │
+     │ python id_cli.py mint --doc-key OC_CORE                                                                         │
+     │ python id_cli.py validate --card-path ids/cards/01JC2P3AZ9.yaml                                                 │
+     │ python id_cli.py rekey --ulid 01JC2P3AZ9 --new-key OC_MAIN                                                      │
+     │ python id_cli.py export --format csv --output registry.csv                                                      │
+     │                                                                                                                 │
+     │ Contract 4: CI Workflow Interface (Workstream A → B)                                                            │
+     │                                                                                                                 │
+     │ # Commands that CI workflows will call                                                                          │
+     │ python -m core.plugins.id.validate --check-all                                                                  │
+     │ python -m core.plugins.id.registry --build                                                                      │
+     │                                                                                                                 │
+     │ Weekly Sync Meetings                                                                                            │
+     │                                                                                                                 │
+     │ - Monday: Week kickoff, review interface contracts, unblock dependencies                                        │
+     │ - Wednesday: Mid-week check-in, demo progress, surface issues                                                   │
+     │ - Friday: Week wrap-up, plan next week, update integration timeline                                             │
+     │                                                                                                                 │
+     │ Communication Channels                                                                                          │
+     │                                                                                                                 │
+     │ - Slack channel: #id-module-dev for async updates                                                               │
+     │ - Shared doc: Interface contract definitions (living document)                                                  │
+     │ - GitHub labels: ws:A, ws:B, ws:C, ws:D for issue tracking                                                      │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Workstream Dependencies (Visual)                                                                                │
+     │                                                                                                                 │
+     │ Week 0: Interface Contracts Defined                                                                             │
+     │         ↓                                                                                                       │
+     │ Week 1:                                                                                                         │
+     │     Workstream A: Schemas + Interfaces ──→ Published to all                                                     │
+     │                       ↓                                                                                         │
+     │     Workstream B: ← Wait for schemas                                                                            │
+     │     Workstream C: ← Wait for schemas                                                                            │
+     │     Workstream D: ← Wait for schemas                                                                            │
+     │                                                                                                                 │
+     │ Week 2:                                                                                                         │
+     │     Workstream A: Core plugins ──┐                                                                              │
+     │     Workstream B: id-guard.yml   │  (Independent work)                                                          │
+     │     Workstream C: Lifecycle ops  │                                                                              │
+     │     Workstream D: Migration      ┘                                                                              │
+     │                                                                                                                 │
+     │ Week 3:                                                                                                         │
+     │     Workstream A: Integration tests ──┐                                                                         │
+     │     Workstream B: Post-merge workflows│  (Independent work)                                                     │
+     │     Workstream C: BDD testing          │                                                                        │
+     │     Workstream D: Export + observability┘                                                                       │
+     │                                                                                                                 │
+     │ Week 4: Integration Phase (All converge)                                                                        │
+     │     ├─ A + B: Core + CI                                                                                         │
+     │     ├─ A + C: Core + Lifecycle                                                                                  │
+     │     ├─ A + D: Core + Tools                                                                                      │
+     │     └─ All: End-to-end testing                                                                                  │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Risk Management                                                                                                 │
+     │                                                                                                                 │
+     │ Risk: Schema Changes Mid-Development                                                                            │
+     │                                                                                                                 │
+     │ Impact: All workstreams affectedMitigation:                                                                     │
+     │ - Lock schemas after Week 1 (version as 1.0.0)                                                                  │
+     │ - Any changes require all-hands approval + impact analysis                                                      │
+     │ - Use semantic versioning for schemas                                                                           │
+     │                                                                                                                 │
+     │ Risk: Workstream A Delays (Critical Path)                                                                       │
+     │                                                                                                                 │
+     │ Impact: Blocks other workstreamsMitigation:                                                                     │
+     │ - Workstream A has most senior/experienced dev                                                                  │
+     │ - Daily progress check-ins for Workstream A                                                                     │
+     │ - Define "minimum viable schema" for Week 1 delivery                                                            │
+     │                                                                                                                 │
+     │ Risk: Integration Conflicts (Week 4)                                                                            │
+     │                                                                                                                 │
+     │ Impact: Delays final deliveryMitigation:                                                                        │
+     │ - Interface contracts defined upfront (Week 0)                                                                  │
+     │ - Continuous integration: Each workstream merges to develop branch weekly                                       │
+     │ - Early integration spikes: Test A+B integration in Week 2, not Week 4                                          │
+     │                                                                                                                 │
+     │ Risk: Duplicate Work / Miscommunication                                                                         │
+     │                                                                                                                 │
+     │ Impact: Wasted effortMitigation:                                                                                │
+     │ - Clear ownership per workstream                                                                                │
+     │ - Shared GitHub project board with all tasks                                                                    │
+     │ - Weekly demos (show, don't tell)                                                                               │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Timeline Comparison                                                                                             │
+     │                                                                                                                 │
+     │ Sequential (Original Plan)                                                                                      │
+     │                                                                                                                 │
+     │ Phase 1-2: 3 weeks (Core)                                                                                       │
+     │ Phase 3:   1 week  (Lifecycle)                                                                                  │
+     │ Phase 4:   1 week  (Integration)                                                                                │
+     │ Phase 5:   1 week  (MFID)                                                                                       │
+     │ Phase 6:   1 week  (Observability)                                                                              │
+     │ Total: 7 weeks                                                                                                  │
+     │                                                                                                                 │
+     │ Parallel (4 Workstreams)                                                                                        │
+     │                                                                                                                 │
+     │ Week 1: A builds foundation, B/C/D wait                                                                         │
+     │ Week 2: A/B/C/D work independently                                                                              │
+     │ Week 3: A/B/C/D work independently                                                                              │
+     │ Week 4: Integration                                                                                             │
+     │ Total: 4 weeks                                                                                                  │
+     │                                                                                                                 │
+     │ Time Saved: 3 weeks (43% reduction)                                                                             │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Resource Requirements                                                                                           │
+     │                                                                                                                 │
+     │ Minimum Team Size: 4 developers                                                                                 │
+     │                                                                                                                 │
+     │ - 1 x Senior (Workstream A - critical path)                                                                     │
+     │ - 1 x DevOps/CI (Workstream B)                                                                                  │
+     │ - 1 x Testing/BDD (Workstream C)                                                                                │
+     │ - 1 x Tools/Observability (Workstream D)                                                                        │
+     │                                                                                                                 │
+     │ Optimal Team Size: 5-6 developers                                                                               │
+     │                                                                                                                 │
+     │ - 2 x Senior (Workstream A - pair on core plugins)                                                              │
+     │ - 1 x DevOps (Workstream B)                                                                                     │
+     │ - 1 x Testing (Workstream C)                                                                                    │
+     │ - 1 x Tools (Workstream D)                                                                                      │
+     │ - 1 x Tech Lead (Part-time coordination, interface contracts, reviews)                                          │
+     │                                                                                                                 │
+     │ Single Developer (Fallback)                                                                                     │
+     │                                                                                                                 │
+     │ If only 1 developer:                                                                                            │
+     │ - Follow original sequential plan (7 weeks)                                                                     │
+     │ - But use workstream breakdown as mental model                                                                  │
+     │ - Complete Workstream A fully before starting B/C/D                                                             │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Success Criteria Per Workstream                                                                                 │
+     │                                                                                                                 │
+     │ Workstream A: Core Infrastructure                                                                               │
+     │                                                                                                                 │
+     │ - All JSON schemas published and versioned                                                                      │
+     │ - Plugin interface contract defined and documented                                                              │
+     │ - Core plugins (mint, validate, ledger, registry) implemented                                                   │
+     │ - 85%+ test coverage                                                                                            │
+     │ - Performance: Handle 1000+ ID Cards in <5 seconds                                                              │
+     │                                                                                                                 │
+     │ Workstream B: CI/CD Automation                                                                                  │
+     │                                                                                                                 │
+     │ - id-guard.yml validates PRs automatically                                                                      │
+     │ - id-post-merge.yml creates tags and rebuilds registry                                                          │
+     │ - id-release.yml generates release notes                                                                        │
+     │ - Zero false positives in validation                                                                            │
+     │ - CI runtime: <2 minutes per PR                                                                                 │
+     │                                                                                                                 │
+     │ Workstream C: Lifecycle Operations                                                                              │
+     │                                                                                                                 │
+     │ - REKEY, DEPRECATE, CONSOLIDATE plugins implemented                                                             │
+     │ - All BDD scenarios pass (behave)                                                                               │
+     │ - Ledger captures all lifecycle events correctly                                                                │
+     │ - 85%+ test coverage                                                                                            │
+     │                                                                                                                 │
+     │ Workstream D: Migration & Tools                                                                                 │
+     │                                                                                                                 │
+     │ - Migration script tested on 50+ real documents                                                                 │
+     │ - Export formats (CSV, Markdown, JSON) validated                                                                │
+     │ - CLI has comprehensive help/docs                                                                               │
+     │ - OpenTelemetry traces visible in Jaeger                                                                        │
+     │ - MFID calculation deterministic                                                                                │
+     │                                                                                                                 │
+     │ ---                                                                                                             │
+     │ Next Steps After Approval                                                                                       │
+     │                                                                                                                 │
+     │ Week 0 (Preparation - 2-3 days)                                                                                 │
+     │                                                                                                                 │
+     │ 1. Team assembly: Assign developers to workstreams                                                              │
+     │ 2. Interface contract meeting: All hands, define schemas + interfaces                                           │
+     │ 3. Tooling setup: GitHub project board, Slack channel, shared docs                                              │
+     │ 4. Branch strategy: Create develop branch, workstream feature branches                                          │
+     │ 5. Kick-off meeting: Review plan, answer questions, set expectations                                            │
+     │                                                                                                                 │
+     │ Week 1 - Day 1 (Workstream A Start)                                                                             │
+     │                                                                                                                 │
+     │ 1. Create feature/ws-a-schemas branch                                                                           │
+     │ 2. Set up project structure                                                                                     │
+     │ 3. Start TDD: Write failing test for ID Card validation                                                         │
+     │ 4. Implement just enough to pass test                                                                           │
+     │ 5. Publish schemas to shared doc for other workstreams                                                          │
+     │                                                                                                                 │
+     │ Week 1 - Day 3 (Workstreams B/C/D Start)                                                                        │
+     │                                                                                                                 │
+     │ 1. Pull latest schemas from Workstream A                                                                        │
+     │ 2. Create workstream branches: feature/ws-b-ci, feature/ws-c-lifecycle, feature/ws-d-tools                      │
+     │ 3. Start independent development                                                                                │
+     │                                                                                                                 │
+     │ Ready to proceed with parallel workstreams?                                                                     │
+     ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
