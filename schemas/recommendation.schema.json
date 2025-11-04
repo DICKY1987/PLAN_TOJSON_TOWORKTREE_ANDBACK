@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Recommendation",
+  "type": "object",
+  "properties": {
+    "rationale": { "type": "string" },
+    "proposed": { "$ref": "./plan.schema.json" }
+  },
+  "required": ["rationale", "proposed"]
+}

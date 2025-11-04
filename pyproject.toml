@@ -1,0 +1,48 @@
+[project]
+name = "plan-tojson-toworktree-andback"
+version = "0.1.0"
+description = "Deterministic plan→JSON→worktree→back core with plugin contracts"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pydantic>=2.8",
+  "jsonschema>=4.23",
+  "opentelemetry-sdk>=1.28.0",
+  "opentelemetry-exporter-otlp>=1.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "pytest-xdist>=3.6",
+  "mypy>=1.11",
+  "ruff>=0.6",
+  "black>=24.8",
+  "bandit>=1.7",
+  "pip-audit>=2.7",
+  "pyyaml>=6.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q --cov=core --cov=plugins --cov-report=xml:coverage.xml --cov-report=json:coverage.json --junitxml=artifacts/junit.xml"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+
+[tool.black]
+line-length = 100
+target-version = ["py310","py311","py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E","F","W","C90","I"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+exclude = ["tests/"]
